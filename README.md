@@ -5,7 +5,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/OpenStack-2024.2%20Dalmatian-red?style=for-the-badge&logo=openstack" alt="OpenStack 2024.2 Dalmatian"/>
+  <img src="https://img.shields.io/badge/OpenStack-2026.1%20Gazpacho-red?style=for-the-badge&logo=openstack" alt="OpenStack 2026.1 Gazpacho"/>
   <img src="https://img.shields.io/badge/Rocky%20Linux-10.2-green?style=for-the-badge&logo=rockylinux" alt="Rocky Linux 10.2"/>
   <img src="https://img.shields.io/badge/Kolla--Ansible-Multinode-blue?style=for-the-badge&logo=ansible" alt="Kolla-Ansible Multinode"/>
   <img src="https://img.shields.io/badge/Docker-Conteneurs-2496ED?style=for-the-badge&logo=docker" alt="Docker"/>
@@ -20,10 +20,10 @@
 - [Environnement de test](#environnement-de-test)
 - [Architecture du déploiement](#architecture-du-déploiement)
 - [Rôles des nœuds](#rôles-des-nœuds)
-  - [Contrôleurs](#contrôleurs----controller01-controller02-controller03)
-  - [Réseau](#réseau----network01)
-  - [Calcul](#calcul----compute01)
-  - [Stockage](#stockage----storage01)
+  - [Contrôleurs](#contrôleurs--controller01-controller02-controller03)
+  - [Réseau](#réseau--network01)
+  - [Calcul](#calcul--compute01)
+  - [Stockage](#stockage--storage01)
 - [Interfaces réseau](#interfaces-réseau)
 - [Services déployés](#services-déployés)
 - [Étape 1 — Création de la VM de base](#étape-1--création-de-la-vm-de-base)
@@ -38,7 +38,9 @@
 - [Étape 10 — Génération des certificats TLS](#étape-10--génération-des-certificats-tls)
 - [Étape 11 — Déploiement d'OpenStack](#étape-11--déploiement-dopenstack)
 - [Étape 12 — Post-déploiement et vérification](#étape-12--post-déploiement-et-vérification)
+- [Étape 13 — Créer et distribuer des tenants](#étape-13--créer-et-distribuer-des-tenants)
 - [Référence — Fichiers importants](#référence--fichiers-importants)
+- [Documentation complémentaire](#documentation-complémentaire)
 
 ---
 
@@ -53,6 +55,10 @@ L'infrastructure repose sur les composants suivants :
 - Cluster **Galera** + **HAProxy** + **Keepalived** pour la haute disponibilité
 - Configuration centralisée via **Ansible**
 - Machines virtuelles provisionnées sous **VMware Workstation**
+
+> **Version cible : OpenStack 2026.1 (Gazpacho).** La série 2024.2 est en fin de vie depuis le 29/04/2026 et ne supporte pas Rocky Linux 10. Détails et sources : [`Docs/Corrections.md`](Docs/Corrections.md).
+>
+> **Périmètre de la haute disponibilité.** Le plan de contrôle (API, MariaDB Galera, RabbitMQ, HAProxy/Keepalived) est en HA sur 3 contrôleurs. Les nœuds réseau, calcul et stockage de cette topologie sont uniques : ce n'est pas encore une plateforme HA de bout en bout. Voir [`Docs/HA-Roadmap.md`](Docs/HA-Roadmap.md).
 
 > Ce guide s'adresse aux ingénieurs **DevOps**, aux architectes **cloud** et aux administrateurs système avancés souhaitant reproduire ce déploiement en laboratoire ou en production.
 
@@ -73,8 +79,8 @@ Avant de commencer, assurez-vous de maîtriser les bases de :
 | Composant | Version / Détail |
 |-----------|-----------------|
 | Système d'exploitation | Rocky Linux 10.2 (ISO minimal) |
-| Plateforme cloud | OpenStack 2024.2 (Dalmatian) |
-| Outil de déploiement | Kolla-Ansible |
+| Plateforme cloud | OpenStack 2026.1 (Gazpacho) |
+| Outil de déploiement | Kolla-Ansible (`stable/2026.1`) |
 | Moteur de conteneurs | Docker |
 | Hyperviseur | VMware Workstation |
 | Orchestrateur | Ansible |
@@ -93,6 +99,8 @@ Le cluster est composé de **6 nœuds** provisionnés sous VMware Workstation. U
 | `compute01` | Calcul | 172.20.10.6 | 4 | 16 | 100 | Virtualisation imbriquée activée |
 | `network01` | Réseau | 172.20.10.7 | 4 | 16 | 80 | |
 | `storage01` | Stockage | 172.20.10.8 | 4 | 8 | 100 + 60 (Swift) | Volume LVM pour Cinder |
+
+**VIP (HAProxy + Keepalived)** : `172.20.10.14`, FQDN `openstack.tubie.lan`. Elle doit rester libre (aucun nœud ne la porte en statique) et appartenir au même sous-réseau que `ens160`.
 
 > ⚠️ **Règle de quorum HA :** Les nœuds contrôleurs doivent toujours être en **nombre impair** (3, 5, 7…) afin que le cluster MariaDB Galera et Keepalived puissent élire un leader en cas de défaillance.
 
@@ -141,7 +149,6 @@ Le nœud de calcul exécute les machines virtuelles des locataires (tenants).
 | `Nova Compute` | Cycle de vie des VMs |
 | `Libvirt / KVM` | Hyperviseur pour l'exécution des VMs |
 | `Neutron OVS Agent` | Connectivité réseau des VMs |
-| `Ceilometer Compute` | Collecte de métriques au niveau compute |
 | `Prometheus Node Exporter` | Monitoring des ressources du nœud |
 
 ---
@@ -176,39 +183,40 @@ Chaque nœud dispose d'**au moins deux interfaces réseau** :
 
 ## Services déployés
 
-### Services cœur
+Le déploiement est découpé en phases : la phase 1 est activée par défaut dans [`Config/globals.yml`](Config/globals.yml) ; la phase 2 est prête à être décommentée une fois la phase 1 validée.
 
-| Service | Statut | Description |
-|---------|--------|-------------|
-| **Keystone** | ✅ Activé | Authentification et identité |
-| **Glance** | ✅ Activé | Catalogue d'images |
-| **Nova** | ✅ Activé | Service de calcul |
-| **Neutron** | ✅ Activé | Service réseau (OVS) |
-| **Horizon** | ✅ Activé | Dashboard web |
-| **Heat** | ✅ Activé | Orchestration (stacks) |
-| **Cinder** | ✅ Activé | Stockage bloc (LVM) |
+### Phase 1 — activés
 
-### Monitoring et télémétrie
+| Service | Description |
+|---------|-------------|
+| **Keystone** | Authentification et identité |
+| **Glance** | Catalogue d'images (stockage partagé NFS `/mnt/glance`) |
+| **Nova** | Service de calcul |
+| **Neutron** | Service réseau (ML2/Open vSwitch) |
+| **Horizon** | Dashboard web |
+| **Heat** | Orchestration (stacks) |
+| **Cinder** | Stockage bloc (LVM) + sauvegarde vers Swift |
+| **Swift** | Stockage objet |
+| **Barbican** | Gestion des secrets et chiffrement |
+| **Magnum** | Orchestration Kubernetes (clusters K8s) |
+| **Designate** | DNS as a Service (bind9) |
+| **HAProxy + Keepalived** | Équilibrage de charge et VIP |
+| **MariaDB (Galera), RabbitMQ, Memcached, Valkey, etcd** | Services d'infrastructure |
+| **Prometheus + Grafana** | Collecte et visualisation des métriques |
 
-| Service | Statut | Description |
-|---------|--------|-------------|
-| **Prometheus** | ✅ Activé | Collecte de métriques |
-| **Grafana** | ✅ Activé | Visualisation des métriques |
-| **Ceilometer** | ✅ Activé | Collecte des données de consommation |
-| **Aodh** | ✅ Activé | Alertes et alarmes |
-| **Gnocchi** | ✅ Activé | Stockage des métriques (backend `file`) |
+### Phase 2 — désactivés (blocs prêts dans `globals.yml`)
 
-### Services avancés
+| Service | Raison | Prérequis |
+|---------|--------|-----------|
+| **Octavia** | Load Balancer as a Service | Image `amphora` construite et téléversée, réseau de gestion `lb-mgmt-net`, certificats Octavia |
+| **Ceilometer / Aodh / Gnocchi** | Télémétrie | Backend Gnocchi partagé (Ceph) : le backend `file` est incohérent avec 3 contrôleurs |
 
-| Service | Statut | Description |
-|---------|--------|-------------|
-| **Zun** | ✅ Activé | Gestion des conteneurs applicatifs |
-| **Kuryr** | ✅ Activé | Intégration réseau pour les conteneurs |
-| **Swift** | ✅ Activé | Stockage objet distribué |
-| **Barbican** | ✅ Activé | Gestion des secrets et chiffrement |
-| **Magnum** | ✅ Activé | Orchestration Kubernetes (clusters K8s) |
-| **Designate** | ✅ Activé | DNS as a Service |
-| **Octavia** | ✅ Activé | Load Balancer as a Service |
+### Retirés
+
+| Service | Raison |
+|---------|--------|
+| **Zun** | Supprimé de Kolla-Ansible en 2026.1 (« Zun is broken in 2026.1 ») |
+| **Kuryr** | Supprimé de Kolla-Ansible en 2026.1 |
 
 ---
 
@@ -375,6 +383,19 @@ ip -br -4 addr show
 ```bash
 sudo hostnamectl set-hostname <hostname>
 hostname  # validation
+```
+
+**Régénérer l'identité machine (recommandé sur les clones) :**
+
+Les clones partagent le `machine-id` et les clés d'hôte SSH de la VM d'origine, ce qui peut provoquer des conflits d'identifiant (DHCP, journaux) et des avertissements SSH. À faire **avant** l'étape 7.
+
+```bash
+sudo rm -f /etc/machine-id /var/lib/dbus/machine-id
+sudo systemd-machine-id-setup
+sudo rm -f /etc/ssh/ssh_host_*
+sudo ssh-keygen -A
+sudo systemctl restart sshd
+cat /etc/machine-id   # doit être différent sur chaque nœud
 ```
 
 **Configurer l'IP statique sur `ens160` :**
@@ -644,8 +665,10 @@ pip install --upgrade pip
 ### 8.3 Installer Ansible
 
 ```bash
-pip install ansible-core
+pip install 'ansible-core>=2.19,<2.21'
 ```
+
+> Kolla-Ansible 2026.1 requiert Ansible 12 à 13, soit ansible-core 2.19 à 2.20.
 
 Créez ensuite le fichier de configuration Ansible :
 
@@ -667,8 +690,10 @@ ansible --version
 ### 8.4 Installer Kolla-Ansible
 
 ```bash
-pip install kolla-ansible
+pip install git+https://opendev.org/openstack/kolla-ansible@stable/2026.1
 ```
+
+> ⚠️ Installez bien la branche `stable/2026.1`. Un simple `pip install kolla-ansible` peut installer une autre série que celle ciblée par `globals.yml` (openstack_release), ce qui provoque des variables et des groupes d'inventaire incohérents.
 
 ### 8.5 Initialiser la configuration
 
@@ -677,14 +702,11 @@ pip install kolla-ansible
 sudo mkdir -p /etc/kolla
 sudo chown $USER:$USER /etc/kolla
 
-# Copier les fichiers de configuration d'exemple
-cp -r /usr/local/share/kolla-ansible/etc_examples/kolla/* /etc/kolla/
-
-# Copier l'inventaire multinode dans le répertoire courant
-cp /usr/local/share/kolla-ansible/ansible/inventory/multinode .
+# Copier les fichiers de configuration d'exemple (globals.yml, passwords.yml)
+cp -r $VIRTUAL_ENV/share/kolla-ansible/etc_examples/kolla/* /etc/kolla/
 ```
 
-> ℹ️ L'inventaire `multinode` est utilisé pour déployer une configuration OpenStack haute disponibilité sur plusieurs nœuds. Il sera édité à l'étape suivante pour refléter votre architecture.
+> ℹ️ L'inventaire `multinode` n'est pas copié à la main : il est généré à l'étape 9.3 à partir de l'inventaire livré avec la version installée (`$VIRTUAL_ENV/share/kolla-ansible/ansible/inventory/multinode`) et de vos hôtes.
 
 ### 8.6 Installer les dépendances Ansible Galaxy
 
@@ -711,15 +733,21 @@ Ce fichier contrôle l'ensemble du comportement du déploiement : VIP, interface
 
 > **Fichier de référence :** [`Config/globals.yml`](Config/globals.yml)
 
+Récupérez le dépôt sur `controller01`, puis copiez le fichier :
+
 ```bash
+git clone https://github.com/Louis-2b/Acceta-Kolla-Ansible-HA.git ~/Acceta-Kolla-Ansible-HA
+cp ~/Acceta-Kolla-Ansible-HA/Config/globals.yml /etc/kolla/globals.yml
 nano /etc/kolla/globals.yml
 ```
 
-Copiez le contenu du fichier [`Config/globals.yml`](Config/globals.yml) du dépôt et adaptez au minimum les paramètres suivants à votre environnement :
+Adaptez au minimum les paramètres suivants à votre environnement :
 
 | Paramètre | Description | Exemple |
 |-----------|-------------|---------|
-| `kolla_internal_vip_address` | IP virtuelle (VIP) HAProxy interne | `172.20.10.10` |
+| `kolla_internal_vip_address` | IP virtuelle (VIP) HAProxy, libre dans le sous-réseau | `172.20.10.14` |
+| `kolla_external_fqdn` | Nom DNS de la VIP (voir 9.4) | `openstack.tubie.lan` |
+| `openstack_release` | Doit correspondre à la branche de kolla-ansible installée | `2026.1` |
 | `network_interface` | Interface de gestion | `ens160` |
 | `neutron_external_interface` | Interface réseau externe (sans IP) | `ens192` |
 | `kolla_base_distro` | Distribution de base des conteneurs | `rocky` |
@@ -740,39 +768,22 @@ kolla-genpwd
 
 ### 9.3 Inventaire `multinode` — Assignation des rôles
 
-L'inventaire définit quels nœuds jouent quels rôles lors du déploiement. Il doit refléter exactement votre architecture.
-
-> **Fichier de référence :** [`Config/multinode`](Config/multinode)
-
-Ouvrez le fichier copié à l'étape précédente :
+Les quelque 300 groupes de l'inventaire dépendent de la version de Kolla-Ansible. Copier un inventaire d'une autre version provoque des erreurs de groupes manquants ou inconnus. Le dépôt ne contient donc que **vos hôtes** ([`Config/multinode.hosts`](Config/multinode.hosts)) ; le script [`Scripts/build-inventory.sh`](Scripts/build-inventory.sh) les assemble avec l'inventaire livré avec la version installée, et place HAProxy/Keepalived sur les 3 contrôleurs.
 
 ```bash
-nano ~/multinode
+source ~/kolla-ansible/bin/activate
+~/Acceta-Kolla-Ansible-HA/Scripts/build-inventory.sh ~/multinode
 ```
 
-Copiez le contenu du fichier [`Config/multinode`](Config/multinode) du dépôt. La structure principale à adapter est la suivante :
+Vérifiez les rôles avant tout déploiement :
 
-```ini
-[control]
-controller01
-controller02
-controller03
-
-[network]
-network01
-
-[compute]
-compute01
-
-[storage]
-storage01
-
-[monitoring]
-controller01
-
-[deployment]
-controller01
+```bash
+ansible-inventory -i ~/multinode --graph loadbalancer   # controller01..03
+ansible-inventory -i ~/multinode --graph mariadb        # controller01..03
+ansible-inventory -i ~/multinode --graph cinder-volume  # storage01
 ```
+
+Pour ajouter un nœud (`network02`, `compute02`...), éditez [`Config/multinode.hosts`](Config/multinode.hosts), puis relancez le script.
 
 ---
 
@@ -781,9 +792,9 @@ controller01
 Ajoutez l'entrée de résolution de la VIP interne dans `/etc/hosts` sur **tous les nœuds** et sur votre poste de travail si vous souhaitez accéder à Horizon depuis un navigateur :
 
 ```bash
-# Remplacez l'IP par votre kolla_internal_vip_address réelle
+# kolla_internal_vip_address + kolla_external_fqdn (globals.yml)
 sudo tee -a /etc/hosts << 'EOF'
-172.20.10.10   openstack.local
+172.20.10.14   openstack.tubie.lan
 EOF
 ```
 
@@ -791,17 +802,20 @@ EOF
 
 ## Étape 10 — Génération des certificats TLS
 
-Kolla-Ansible génère les certificats TLS nécessaires à la sécurisation des API OpenStack et du service de load balancing Octavia.
+Kolla-Ansible génère les certificats TLS nécessaires à la sécurisation des API OpenStack (VIP).
 
 ```bash
-# Certificats TLS pour tous les services OpenStack
-kolla-ansible certificates -i multinode
-
-# Certificats spécifiques à Octavia (load balancer)
-kolla-ansible octavia-certificates -i multinode
+# Certificats TLS pour tous les services OpenStack (CA privée de test)
+kolla-ansible certificates -i ~/multinode
 ```
 
-Les certificats générés sont stockés dans `/etc/kolla/certificates/` et `/etc/kolla/config/octavia/`.
+Les certificats générés sont stockés dans `/etc/kolla/certificates/` (la CA est dans `/etc/kolla/certificates/ca/root.crt`).
+
+> ℹ️ La VIP interne et externe étant la même adresse, seul le TLS « interne » est activé (`kolla_enable_tls_internal`) : c'est la seule configuration documentée pour une topologie à un seul réseau.
+
+> ⚠️ La CA générée est une CA de test, suffisante pour un lab. Avant d'ouvrir le cloud à d'autres personnes, remplacez-la par une CA interne ou des certificats gérés à l'extérieur (`kolla_externally_managed_cert`).
+
+Si vous activez Octavia (phase 2), générez aussi ses certificats : `kolla-ansible octavia-certificates -i ~/multinode` (fichiers dans `/etc/kolla/config/octavia/`).
 
 ---
 
@@ -818,44 +832,57 @@ source ~/kolla-ansible/bin/activate
 Prépare tous les nœuds (installation de Docker, configuration des répertoires Kolla, etc.) :
 
 ```bash
-kolla-ansible bootstrap-servers -i ./multinode
+kolla-ansible bootstrap-servers -i ~/multinode
 ```
 
-![Bootstrap des serveurs](Images/Pic-29.png)
+<!-- ![Bootstrap des serveurs](Images/Pic-29.png) — capture à ajouter -->
 
-### 11.2 Vérifications préalables
+### 11.2 Anneaux Swift
+
+Swift exige que les anneaux (rings) existent **avant** le déploiement. Docker vient d'être installé par l'étape précédente : générez les anneaux sur `controller01`.
+
+```bash
+~/Acceta-Kolla-Ansible-HA/Swift/build_swift_rings.sh
+ls -l /etc/kolla/config/swift   # object/account/container : .builder et .ring.gz
+```
+
+Le script crée 3 réplicas répartis sur les 3 disques de `storage01` (labels `d0`, `d1`, `d2`, étape 5.3). Il refuse d'écraser des anneaux existants (`FORCE=1` pour forcer).
+
+> ⚠️ Si l'image `swift-base` porte un autre nom dans votre version, le script l'indique : relevez-le avec `docker images | grep swift` puis relancez avec `KOLLA_SWIFT_BASE_IMAGE=<nom:étiquette>`.
+
+### 11.3 Vérifications préalables
 
 Valide la configuration avant le déploiement (interfaces, ressources, connectivité) :
 
 ```bash
-kolla-ansible prechecks -i ./multinode
+kolla-ansible prechecks -i ~/multinode
 ```
 
-![Vérifications préalables](Images/Pic-30.png)
+<!-- ![Vérifications préalables](Images/Pic-30.png) — capture à ajouter -->
 
 > ⚠️ Ne passez pas à l'étape suivante si des erreurs sont signalées. Corrigez-les d'abord.
 
-### 11.3 Déploiement
+### 11.4 Déploiement
 
 Lance le déploiement complet de l'infrastructure OpenStack :
 
 ```bash
-kolla-ansible deploy -i ./multinode
+kolla-ansible deploy -i ~/multinode
 ```
 
-![Déploiement OpenStack](Images/Pic-31.png)
+<!-- ![Déploiement OpenStack](Images/Pic-31.png) — capture à ajouter -->
 
 Cette étape peut prendre **30 à 60 minutes** selon les ressources disponibles.
 
-### 11.4 Validation de la configuration
+### 11.5 Validation de la configuration
 
 Vérifie que tous les services sont correctement configurés après déploiement :
 
 ```bash
-kolla-ansible validate-config -i ./multinode
+kolla-ansible validate-config -i ~/multinode
 ```
 
-![Validation de la configuration](Images/Pic-32.png)
+<!-- ![Validation de la configuration](Images/Pic-32.png) — capture à ajouter -->
 
 ---
 
@@ -869,7 +896,7 @@ La commande `post-deploy` génère les fichiers `clouds.yaml` et `admin-openrc.s
 kolla-ansible post-deploy
 ```
 
-![Post-déploiement](Images/Pic-33.png)
+<!-- ![Post-déploiement](Images/Pic-33.png) — capture à ajouter -->
 
 Vérifiez la présence des fichiers :
 
@@ -881,7 +908,7 @@ ls /etc/kolla/clouds.yaml /etc/kolla/admin-openrc.sh
 
 ```bash
 pip install python-openstackclient \
-  -c https://releases.openstack.org/constraints/upper/2024.2
+  -c https://releases.openstack.org/constraints/upper/2026.1
 ```
 
 ### 12.3 Charger les variables d'environnement
@@ -890,7 +917,7 @@ pip install python-openstackclient \
 source /etc/kolla/admin-openrc.sh
 ```
 
-![Chargement des variables](Images/Pic-35.png)
+<!-- ![Chargement des variables](Images/Pic-35.png) — capture à ajouter -->
 
 ### 12.4 Vérifier l'état des services
 
@@ -899,7 +926,7 @@ source /etc/kolla/admin-openrc.sh
 openstack service list
 ```
 
-![Liste des services](Images/Pic-34.png)
+<!-- ![Liste des services](Images/Pic-34.png) — capture à ajouter -->
 
 ```bash
 # Vérifier l'état des nœuds de calcul
@@ -908,11 +935,13 @@ openstack compute service list
 
 ### 12.5 Accéder au tableau de bord Horizon
 
-Ouvrez un navigateur et accédez à l'adresse de votre VIP interne :
+Ouvrez un navigateur sur le FQDN de la VIP (entrée `/etc/hosts` de l'étape 9.4) :
 
 ```
-http://<kolla_internal_vip_address>
+https://openstack.tubie.lan
 ```
+
+> Le TLS utilise la CA privée générée à l'étape 10 : le navigateur affichera un avertissement tant que `/etc/kolla/certificates/ca/root.crt` n'est pas importé comme autorité de confiance. Le client en ligne de commande utilise cette CA via `admin-openrc.sh` (`kolla_admin_openrc_cacert`).
 
 Identifiants de connexion :
 
@@ -925,9 +954,17 @@ Identifiants de connexion :
 grep keystone_admin_password /etc/kolla/passwords.yml
 ```
 
-![Écran de connexion Horizon](Images/Pic-36.png)
-![Tableau de bord Horizon](Images/Pic-37.png)
-![Vue d'ensemble du projet](Images/Pic-38.png)
+<!-- ![Écran de connexion Horizon](Images/Pic-36.png) — capture à ajouter -->
+<!-- ![Tableau de bord Horizon](Images/Pic-37.png) — capture à ajouter -->
+<!-- ![Vue d'ensemble du projet](Images/Pic-38.png) — capture à ajouter -->
+
+---
+
+## Étape 13 — Créer et distribuer des tenants
+
+Une fois le cloud validé, créez un **projet** par tenant, un utilisateur avec le rôle `member` (jamais `admin`), des quotas, un réseau externe partagé pour les adresses flottantes, des flavors et des images.
+
+> Guide pas à pas : [`Docs/Tenants.md`](Docs/Tenants.md)
 
 ---
 
@@ -936,9 +973,21 @@ grep keystone_admin_password /etc/kolla/passwords.yml
 | Fichier | Emplacement | Description |
 |---------|-------------|-------------|
 | [`globals.yml`](Config/globals.yml) | `/etc/kolla/globals.yml` | Configuration principale du déploiement |
-| [`multinode`](Config/multinode) | `~/multinode` | Inventaire Ansible (rôles des nœuds) |
+| [`multinode.hosts`](Config/multinode.hosts) | dépôt | Vos hôtes et rôles (sans les groupes dépendants de la version) |
+| `multinode` | `~/multinode` | Inventaire complet, généré par [`Scripts/build-inventory.sh`](Scripts/build-inventory.sh) |
+| [`build_swift_rings.sh`](Swift/build_swift_rings.sh) | `controller01` | Génère les anneaux Swift dans `/etc/kolla/config/swift/` |
 | `passwords.yml` | `/etc/kolla/passwords.yml` | Mots de passe des services (généré par `kolla-genpwd`) |
 | `admin-openrc.sh` | `/etc/kolla/admin-openrc.sh` | Variables d'environnement pour le client CLI |
 | `clouds.yaml` | `/etc/kolla/clouds.yaml` | Configuration SDK OpenStack |
 | Certificats TLS | `/etc/kolla/certificates/` | Certificats des API OpenStack |
-| Certificats Octavia | `/etc/kolla/config/octavia/` | Certificats du load balancer |
+| Certificats Octavia | `/etc/kolla/config/octavia/` | Certificats du load balancer (phase 2) |
+
+---
+
+## Documentation complémentaire
+
+| Document | Contenu |
+|----------|---------|
+| [`Docs/Tenants.md`](Docs/Tenants.md) | Créer des projets, utilisateurs, quotas, réseaux, images et flavors pour vos tenants |
+| [`Docs/HA-Roadmap.md`](Docs/HA-Roadmap.md) | État réel de la HA, topologie cible, tests de panne, sauvegardes |
+| [`Docs/Corrections.md`](Docs/Corrections.md) | Corrections apportées à la configuration, avec leurs sources, et points restant à vérifier |

@@ -1,0 +1,43 @@
+# +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+# Vos hôtes — Kolla-Ansible 2026.1 (Gazpacho)
+# +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+#
+# Ce fichier ne contient QUE ce qui est propre à votre architecture.
+# Les ~300 autres groupes de l'inventaire dépendent de la version de
+# Kolla-Ansible : ils sont repris de l'inventaire livré avec la version
+# installée, par le script Scripts/build-inventory.sh, qui génère
+# ~/multinode.
+#
+# Ne pas copier ce fichier seul avec "-i" : il est incomplet.
+
+[control]
+controller01
+controller02
+controller03
+
+[network]
+network01
+# Pour un routage réellement HA, ajoutez un second nœud réseau :
+# network02
+
+[compute]
+compute01
+# compute02
+
+[monitoring]
+controller01
+
+[storage]
+storage01
+
+[deployment]
+localhost ansible_connection=local
+
+# HAProxy + Keepalived (VIP) sur les 3 contrôleurs : si le nœud qui porte la
+# VIP tombe, elle bascule sur un autre contrôleur. Par défaut l'inventaire
+# livré place ce groupe sur [network] ; le script remplace ce bloc par
+# celui-ci.
+[loadbalancer]
+controller01
+controller02
+controller03
