@@ -12,12 +12,14 @@ Objectif du projet : un cloud privé OpenStack hautement disponible, dont vous g
 | Réseau (Neutron : L3, DHCP, metadata) | ❌ | un seul nœud `network01` : s'il tombe, plus de routage, de NAT ni d'adresses flottantes |
 | Calcul (Nova) | ❌ | un seul `compute01` : s'il tombe, toutes les VMs sont arrêtées |
 | Stockage bloc (Cinder LVM) | ❌ | un seul `storage01` ; la documentation Kolla signale des problèmes du backend LVM en multi-contrôleurs |
-| Stockage objet (Swift) | ❌ | 3 réplicas, mais sur 3 disques d'un même nœud |
+| Stockage objet (Swift) | — | non déployé : images conteneur indisponibles pour 2026.1 |
 | Images (Glance sur NFS) | ❌ | partage NFS servi par `storage01` : point de défaillance unique |
 | Supervision | ❌ | Prometheus et Grafana uniquement sur `controller01` |
 | Nœud de déploiement | ⚠️ | `controller01` : sans impact en production, mais perdre `/etc/kolla` (mots de passe, certificats) est grave |
 
 Conclusion : seul le **plan de contrôle** est HA. Les VMs et leurs données dépendent de nœuds uniques.
+
+**Dimensionnement actuel (mesuré le 08/10/2026).** Contrôleurs : 4 vCPU et 3,8 Go de RAM ; `network01`, `compute01` et `storage01` : 4 vCPU et 1,9 Go ; disque racine de 35 Go partout. C'est très en dessous de ce qu'un plan de contrôle OpenStack demande : il faut augmenter la RAM avant le déploiement (voir [`Depannage.md`](Depannage.md#ram-insuffisante)). Une fois le cluster stable, la RAM disponible sur `compute01` limitera aussi le nombre de VMs de tenants.
 
 ## 2. Topologie cible
 

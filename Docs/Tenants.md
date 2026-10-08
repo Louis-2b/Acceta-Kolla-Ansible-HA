@@ -29,14 +29,16 @@ openstack subnet create public-subnet \
   --network public \
   --subnet-range 172.20.10.0/28 \
   --gateway 172.20.10.1 \
-  --allocation-pool start=172.20.10.9,end=172.20.10.13 \
+  --allocation-pool start=172.20.10.11,end=172.20.10.13 \
   --dns-nameserver 1.1.1.1 \
   --no-dhcp
 ```
 
-> ⚠️ **Plage très limitée.** Le sous-réseau `172.20.10.0/28` ne compte que 14 adresses utilisables. Vos 6 nœuds en occupent 6 (`.2`, `.3`, `.5`, `.6`, `.7`, `.8`), la VIP `.14` et la passerelle `.1` en occupent 2 : il reste `.4` et `.9` à `.13`. Chaque routeur de tenant consomme **une** adresse de cette plage pour sortir sur Internet, et chaque adresse flottante en consomme une autre. Avec 5 adresses, vous ne pourrez pas servir plus de quelques tenants.
+> ⚠️ **Plage très limitée.** Le sous-réseau `172.20.10.0/28` ne compte que 14 adresses utilisables. Adresses occupées d'après le tableau d'architecture du README : la passerelle `.1` (supposée), les 6 nœuds (`.3`, `.6`, `.7`, `.8`, `.9`, `.10`) et la VIP `.14`. Restent a priori libres : `.2`, `.4`, `.5`, `.11`, `.12`, `.13`. L'exemple ci-dessus utilise `.11` à `.13`, soit **3 adresses**.
 >
-> Prévoyez un réseau externe plus large (un `/24` dédié ou un VLAN) avant d'ouvrir le cloud à plusieurs personnes. Assurez-vous aussi que le DHCP de votre LAN n'attribue pas les adresses de la plage `allocation-pool`.
+> Chaque routeur de tenant consomme **une** adresse de cette plage pour sortir sur Internet, et chaque adresse flottante en consomme une autre : 3 adresses suffisent pour un seul tenant (un routeur et deux adresses flottantes). Prévoyez un réseau externe plus large (un `/24` dédié ou un VLAN) avant d'ouvrir le cloud à plusieurs personnes.
+>
+> **Avant de créer le sous-réseau**, vérifiez que ces adresses sont réellement libres : elles ne doivent être attribuées ni par le DHCP de votre réseau ni à un autre appareil. Un `ping -c 1 -W 1 172.20.10.11` sans réponse ne le prouve pas (certains appareils ignorent le ping) : consultez aussi les baux DHCP de votre routeur. Vérifiez enfin la passerelle réelle (`ip route` sur un nœud) : le `.1` n'est qu'une hypothèse.
 
 ---
 
@@ -150,5 +152,5 @@ Le fichier `root.crt` est la CA de `/etc/kolla/certificates/ca/root.crt` : remet
 - **Réseaux** : seul `public` est partagé (`--share`). Les réseaux privés des tenants ne le sont pas.
 - **Images** : rendez publiques (`--public`) seulement les images de confiance. Les images d'un tenant restent privées.
 - **Mots de passe** : transmettez-les par un canal sûr et demandez un changement à la première connexion.
-- **Sauvegardes** : les volumes d'un tenant sont sauvegardés vers Swift sur le même nœud de stockage ; ce n'est pas une sauvegarde indépendante (voir [`HA-Roadmap.md`](HA-Roadmap.md)).
+- **Sauvegardes** : la sauvegarde Cinder est désactivée (Swift n'est pas disponible avec 2026.1) : les volumes des tenants ne sont **pas sauvegardés**. Prévenez vos tenants et voir [`HA-Roadmap.md`](HA-Roadmap.md).
 - **Domaines Keystone** : un domaine par groupe de tenants permet de déléguer la gestion des utilisateurs. Pour commencer, le domaine `Default` suffit. Si vous utilisez d'autres domaines, vérifiez que Horizon affiche le champ « Domaine » à la connexion (support multi-domaines de Horizon, à contrôler dans votre version).

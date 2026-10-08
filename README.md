@@ -89,16 +89,20 @@ Avant de commencer, assurez-vous de maîtriser les bases de :
 
 ## Architecture du déploiement
 
-Le cluster est composé de **6 nœuds** provisionnés sous VMware Workstation. Une VM de base (`controller01`) a été créée puis clonée pour produire les nœuds supplémentaires. Chaque nœud fonctionne sous **Rocky Linux 10.2 (ISO minimal)** et dispose de ressources adaptées à son rôle.
+Le cluster est composé de **6 nœuds** provisionnés sous VMware Workstation. Une VM de base (`controller01`) a été créée puis clonée pour produire les nœuds supplémentaires. Chaque nœud fonctionne sous **Rocky Linux 10.2 (ISO minimal)**.
 
-| Nom d'hôte | Rôle | IPv4 | vCPU | RAM (Go) | Stockage (Go) | Notes |
-|------------|------|------|------|----------|---------------|-------|
-| `controller01` | Contrôleur | 172.20.10.2 | 8 | 24 | 150–200 | Nœud de déploiement Kolla |
-| `controller02` | Contrôleur | 172.20.10.3 | 8 | 24 | 150–200 | |
-| `controller03` | Contrôleur | 172.20.10.5 | 8 | 24 | 150–200 | |
-| `compute01` | Calcul | 172.20.10.6 | 4 | 16 | 100 | Virtualisation imbriquée activée |
-| `network01` | Réseau | 172.20.10.7 | 4 | 16 | 80 | |
-| `storage01` | Stockage | 172.20.10.8 | 4 | 8 | 100 + 60 (Swift) | Volume LVM pour Cinder |
+| Nom d'hôte | Rôle | IPv4 | vCPU | RAM mesurée | RAM recommandée (lab) | Disque racine | Notes |
+|------------|------|------|------|-------------|-----------------------|---------------|-------|
+| `controller01` | Contrôleur | 172.20.10.3 | 4 | 3,8 Go | 8–12 Go | 35 Go | Nœud de déploiement Kolla |
+| `controller02` | Contrôleur | 172.20.10.6 | 4 | 3,8 Go | 8–12 Go | 35 Go | |
+| `controller03` | Contrôleur | 172.20.10.7 | 4 | 3,8 Go | 8–12 Go | 35 Go | |
+| `compute01` | Calcul | 172.20.10.8 | 4 | 1,9 Go | 6–8 Go | 35 Go | Virtualisation imbriquée activée |
+| `network01` | Réseau | 172.20.10.9 | 4 | 1,9 Go | 3–4 Go | 35 Go | |
+| `storage01` | Stockage | 172.20.10.10 | 4 | 1,9 Go | 3–4 Go | 35 Go | Disque LVM pour Cinder, serveur NFS pour Glance |
+
+Les colonnes « mesurée » et « disque racine » viennent des commandes `nproc`, `free -h` et `df -h /` lancées sur chaque nœud le 08/10/2026. Les adresses sont celles relevées avec `hostname -I`.
+
+> ⚠️ **RAM recommandée = estimation de lab**, pas une valeur de la documentation Kolla : à ajuster à la mémoire de votre PC hôte. Un contrôleur fait tourner MariaDB, RabbitMQ et tous les services OpenStack : avec 3,8 Go, il est probable que des conteneurs soient tués par manque de mémoire. Augmentez la RAM des VMs (éteintes) **avant** `kolla-ansible deploy`.
 
 **VIP (HAProxy + Keepalived)** : `172.20.10.14`, FQDN `openstack.tubie.lan`. Elle doit rester libre (aucun nœud ne la porte en statique) et appartenir au même sous-réseau que `ens160`.
 
@@ -155,15 +159,14 @@ Le nœud de calcul exécute les machines virtuelles des locataires (tenants).
 
 ### Stockage — `storage01`
 
-Le nœud de stockage fournit du stockage persistant en mode bloc et objet.
+Le nœud de stockage fournit du stockage persistant en mode bloc, et sert le partage NFS utilisé par Glance.
 
 | Service | Description |
 |---------|-------------|
-| `Cinder Volume` | Volumes bloc (backend LVM) |
-| `Cinder Backup` | Sauvegarde des volumes vers Swift |
+| `Cinder Volume` | Volumes bloc (backend LVM, groupe d'inventaire `cinder-volume-lvm`) |
 | `LVM` | Gestion des volumes logiques (`cinder-volumes`) |
 | `iscsid / tgtd` | Services iSCSI pour les volumes Cinder |
-| `Swift (account / container / object)` | Stockage objet distribué |
+| `Serveur NFS` | Partage `/srv/nfs/glance`, monté par les contrôleurs (images Glance) |
 | `Prometheus Node Exporter` | Monitoring des ressources du nœud |
 
 ---
@@ -195,8 +198,7 @@ Le déploiement est découpé en phases : la phase 1 est activée par défaut da
 | **Neutron** | Service réseau (ML2/Open vSwitch) |
 | **Horizon** | Dashboard web |
 | **Heat** | Orchestration (stacks) |
-| **Cinder** | Stockage bloc (LVM) + sauvegarde vers Swift |
-| **Swift** | Stockage objet |
+| **Cinder** | Stockage bloc (LVM) |
 | **Barbican** | Gestion des secrets et chiffrement |
 | **Magnum** | Orchestration Kubernetes (clusters K8s) |
 | **Designate** | DNS as a Service (bind9) |
@@ -217,6 +219,8 @@ Le déploiement est découpé en phases : la phase 1 est activée par défaut da
 |---------|--------|
 | **Zun** | Supprimé de Kolla-Ansible en 2026.1 (« Zun is broken in 2026.1 ») |
 | **Kuryr** | Supprimé de Kolla-Ansible en 2026.1 |
+| **Swift** | Les images conteneur ne sont pas publiées sur quay.io pour 2026.1 (voir [`Docs/Depannage.md`](Docs/Depannage.md)) |
+| **Sauvegarde Cinder** | Utilisait Swift comme destination ; à remettre avec un autre backend (NFS, Ceph, S3) |
 
 ---
 
@@ -232,6 +236,8 @@ Créez une VM de référence (`controller01`) qui servira de base pour le clonag
 | RAM | 16 Go (minimum 8 Go) |
 | Disque | 60 Go+ |
 | Type de disque | Thin Provision |
+
+> **Thin Provision** : le fichier du disque virtuel ne grossit qu'avec les données réellement écrites, au lieu de réserver toute la taille d'un coup. C'est pratique pour 6 VMs, mais laissez de la marge sur le disque du PC hôte : s'il se remplit, les VMs peuvent se figer.
 
 ![Spécifications de la VM](Images/Pic-01.png)
 
@@ -414,6 +420,12 @@ ip a show ens160  # validation
 
 > Remplacez `172.20.10.X` par l'adresse IP correspondant au nœud (voir [tableau d'architecture](#architecture-du-déploiement)).
 
+Vérifiez que l'adresse est bien **statique**. En DHCP, elle peut changer au redémarrage et casser le cluster :
+
+```bash
+nmcli -g ipv4.method con show ens160   # doit afficher : manual
+```
+
 ### 4.3 Fichier `/etc/hosts` sur `controller01`
 
 `controller01` est le nœud de déploiement Kolla-Ansible. Ce fichier lui permet de résoudre tous les nœuds par nom d'hôte. Les entrées DNS sur les autres nœuds seront propagées par Ansible.
@@ -425,12 +437,12 @@ sudo nano /etc/hosts
 Ajoutez les entrées suivantes :
 
 ```text
-172.20.10.2  controller01
-172.20.10.3  controller02
-172.20.10.5  controller03
-172.20.10.6  compute01
-172.20.10.7  network01
-172.20.10.8  storage01
+172.20.10.3   controller01
+172.20.10.6   controller02
+172.20.10.7   controller03
+172.20.10.8   compute01
+172.20.10.9   network01
+172.20.10.10  storage01
 ```
 
 Vérifiez la connectivité vers tous les nœuds :
@@ -459,10 +471,11 @@ La virtualisation imbriquée est requise pour que KVM fonctionne à l'intérieur
 
 ### 5.2 Attacher et préparer les disques de stockage sur `storage01`
 
-Cinder (stockage bloc) et Swift (stockage objet) nécessitent chacun des disques dédiés :
+Cinder (stockage bloc) nécessite un disque dédié :
 
 - **1 disque de 20 Go** pour Cinder (volume LVM)
-- **3 disques de 20 Go** pour Swift (un par partition de données)
+
+> Swift est désactivé avec 2026.1 (voir [`Docs/Depannage.md`](Docs/Depannage.md)) : les 3 disques Swift prévus à l'origine ne sont plus nécessaires. Si vous les avez déjà ajoutés, laissez-les inutilisés.
 
 **Ajouter les disques virtuels dans VMware :**
 
@@ -479,7 +492,7 @@ Cinder (stockage bloc) et Swift (stockage objet) nécessitent chacun des disques
 lsblk
 ```
 
-**Résultat attendu :** `nvme0n2` (Cinder) + `nvme0n3`, `nvme0n4`, `nvme0n5` (Swift), tous libres et sans partition.
+**Résultat attendu :** un disque libre et sans partition pour Cinder (`nvme0n2` dans cet exemple).
 
 **Initialiser le volume LVM pour Cinder :**
 
@@ -491,28 +504,9 @@ sudo vgs  # validation
 
 > Adaptez `/dev/nvme0n2` au nom de disque détecté par `lsblk` sur votre système.
 
-### 5.3 Préparer les disques Swift
+### 5.3 Disques Swift (non requis)
 
-Formatez les trois disques Swift avec un système de fichiers XFS et étiquetez-les pour que Kolla-Ansible les détecte automatiquement.
-
-> ⚠️ Cette opération est destructive. Vérifiez que les disques sont bien vierges avant de l'exécuter.
-
-```bash
-index=0
-for d in nvme0n3 nvme0n4 nvme0n5; do
-  sudo parted /dev/${d} -s -- mklabel gpt mkpart KOLLA_SWIFT_DATA 1 -1
-  sudo mkfs.xfs -f -L d${index} /dev/${d}p1
-  (( index++ ))
-done
-```
-
-**Vérification :**
-
-```bash
-lsblk -o NAME,LABEL,FSTYPE,SIZE
-```
-
-Les partitions `nvme0n3p1`, `nvme0n4p1`, `nvme0n5p1` doivent apparaître avec les labels `d0`, `d1`, `d2` et le type `xfs`.
+Les images conteneur Swift n'étant pas publiées pour 2026.1, Swift est désactivé (`enable_swift: "no"`) et il n'y a **aucun disque Swift à préparer**. Ne formatez pas de disque pour cet usage.
 
 ---
 
@@ -548,6 +542,8 @@ sudo firewall-cmd --reload
 
 > `no_root_squash` est requis : Ansible doit pouvoir corriger les permissions de ce dossier en tant que `root` lors du déploiement de Glance. Sans cette option, le conteneur `glance-api` échouera à écrire dans le répertoire.
 
+> Les images Glance sont écrites sur le disque racine de `storage01` (35 Go mesurés) : surveillez l'espace avec `df -h /srv/nfs/glance` avant de téléverser plusieurs images.
+
 ### 6.2 Monter le partage sur les trois contrôleurs
 
 À répéter sur **`controller01`**, **`controller02`** et **`controller03`** :
@@ -557,11 +553,28 @@ sudo dnf install -y nfs-utils
 
 sudo mkdir -p /mnt/glance
 
-echo "172.20.10.8:/srv/nfs/glance /mnt/glance nfs defaults,_netdev 0 0" | \
+# Format : <IP de storage01>:<dossier exporté> <point de montage> nfs <options> 0 0
+echo "172.20.10.10:/srv/nfs/glance /mnt/glance nfs defaults,_netdev 0 0" | \
   sudo tee -a /etc/fstab
 
 sudo mount -a
-df -h /mnt/glance  # doit afficher le montage NFS, pas le disque local
+df -h /mnt/glance  # doit afficher 172.20.10.10:/srv/nfs/glance, pas le disque local
+```
+
+**Que mettre dans cette ligne ?**
+
+| Champ | Valeur | Explication |
+|-------|--------|-------------|
+| `172.20.10.10:/srv/nfs/glance` | IP de `storage01` + dossier exporté | Le serveur NFS est `storage01`, le dossier est celui créé à l'étape 6.1 |
+| `/mnt/glance` | Point de montage local | Même chemin que `glance_file_datadir_volume` dans `globals.yml` |
+| `_netdev` | Option | Attend que le réseau soit disponible avant de monter |
+
+> ⚠️ Utilisez l'**IP réelle de `storage01`** (`hostname -I` sur `storage01`), pas celle d'un autre nœud : le tableau d'architecture donne `172.20.10.10`. Utilisez l'IP plutôt que le nom : à ce stade, seul `controller01` résout les noms de nœuds (étape 4.3).
+
+Vérifiez que le serveur répond avant de monter :
+
+```bash
+showmount -e 172.20.10.10   # doit lister /srv/nfs/glance
 ```
 
 ### 6.3 Vérifier le partage entre les nœuds
@@ -581,14 +594,20 @@ sudo rm /mnt/glance/test-partage
 
 ### 6.4 SELinux sur Rocky Linux
 
-Si SELinux est en mode `enforcing` (par défaut), le bind-mount NFS vers les conteneurs peut être bloqué. En cas d'erreurs de permission côté `glance-api` après déploiement malgré un montage fonctionnel :
+À faire **uniquement sur les 3 contrôleurs** : ce sont eux qui montent `/mnt/glance` et font tourner le conteneur `glance-api`. `storage01` (serveur NFS), `network01` et `compute01` n'ont rien à faire.
+
+Si SELinux est en mode `enforcing` (par défaut), le bind-mount NFS vers les conteneurs peut être bloqué. Vous pouvez activer l'autorisation dès maintenant, sans risque, avant `kolla-ansible deploy` :
 
 ```bash
-# Diagnostiquer les refus SELinux
-ausearch -m avc -ts recent
-
-# Autoriser l'accès NFS par les conteneurs virtuels
+# Autoriser l'accès NFS par les conteneurs virtuels (sur chaque contrôleur)
 sudo setsebool -P virt_use_nfs on
+getsebool virt_use_nfs        # attendu : virt_use_nfs --> on
+```
+
+En cas d'erreurs de permission côté `glance-api` après déploiement malgré un montage fonctionnel, diagnostiquez les refus SELinux sur le contrôleur concerné :
+
+```bash
+sudo ausearch -m avc -ts recent   # "<no matches>" = aucun refus enregistré
 ```
 
 ---
@@ -646,6 +665,14 @@ sudo dnf install -y \
   openssl-devel \
   python3-libselinux
 ```
+
+> ⚠️ Si `dnf` répond `nothing provides openssl-libs ... needed by openssl-devel`, les dépôts BaseOS et AppStream sont temporairement désynchronisés (miroir en retard). Rafraîchissez les métadonnées puis relancez l'installation :
+>
+> ```bash
+> sudo dnf clean all && sudo dnf makecache && sudo dnf update -y
+> ```
+>
+> N'utilisez pas `--skip-broken` : il ignorerait `openssl-devel`. Voir [`Docs/Depannage.md`](Docs/Depannage.md).
 
 ### 8.2 Créer un environnement virtuel Python
 
@@ -780,8 +807,12 @@ Vérifiez les rôles avant tout déploiement :
 ```bash
 ansible-inventory -i ~/multinode --graph loadbalancer   # controller01..03
 ansible-inventory -i ~/multinode --graph mariadb        # controller01..03
-ansible-inventory -i ~/multinode --graph cinder-volume  # storage01
+ansible-inventory -i ~/multinode --graph cinder-volume-lvm  # storage01
 ```
+
+> L'avertissement `Invalid characters were found in group names but not replaced` est normal : les noms de groupes Kolla contiennent des tirets. Vous pouvez l'ignorer.
+
+> Avec Kolla-Ansible 2026.1, le groupe générique `cinder-volume` est rattaché aux contrôleurs, alors que le backend LVM utilise le groupe dédié `cinder-volume-lvm`, rattaché à `storage` (là où se trouve le volume group `cinder-volumes`). Contrôle après déploiement : `openstack volume service list` (étape 12.4).
 
 Pour ajouter un nœud (`network02`, `compute02`...), éditez [`Config/multinode.hosts`](Config/multinode.hosts), puis relancez le script.
 
@@ -789,14 +820,25 @@ Pour ajouter un nœud (`network02`, `compute02`...), éditez [`Config/multinode.
 
 ### 9.4 Entrée DNS locale pour la VIP
 
-Ajoutez l'entrée de résolution de la VIP interne dans `/etc/hosts` sur **tous les nœuds** et sur votre poste de travail si vous souhaitez accéder à Horizon depuis un navigateur :
+Ajoutez l'entrée de résolution de la VIP dans `/etc/hosts` sur **les 6 nœuds**, et sur votre poste de travail si vous souhaitez accéder à Horizon depuis un navigateur.
+
+Depuis `controller01` (nécessite l'accès SSH sans mot de passe de l'étape 7), la boucle suivante n'ajoute la ligne que si elle n'existe pas déjà :
 
 ```bash
 # kolla_internal_vip_address + kolla_external_fqdn (globals.yml)
-sudo tee -a /etc/hosts << 'EOF'
-172.20.10.14   openstack.tubie.lan
-EOF
+for h in controller01 controller02 controller03 network01 compute01 storage01; do
+  ssh kolla@$h "grep -q 'openstack.tubie.lan' /etc/hosts || echo '172.20.10.14   openstack.tubie.lan' | sudo tee -a /etc/hosts >/dev/null"
+done
+
+# Vérification
+for h in controller01 controller02 controller03 network01 compute01 storage01; do
+  echo -n "$h : "; ssh kolla@$h "grep openstack.tubie.lan /etc/hosts"
+done
 ```
+
+Sur votre poste de travail, ajoutez la même ligne dans `/etc/hosts` (Linux, macOS) ou dans `C:\Windows\System32\drivers\etc\hosts` (Windows, éditeur lancé en administrateur).
+
+> La VIP `172.20.10.14` doit rester libre : aucun nœud ne doit l'avoir configurée en statique. Si vous la modifiez dans `globals.yml`, mettez à jour cette entrée et régénérez les certificats.
 
 ---
 
@@ -804,12 +846,20 @@ EOF
 
 Kolla-Ansible génère les certificats TLS nécessaires à la sécurisation des API OpenStack (VIP).
 
+La commande s'exécute **sur `controller01`** (nœud de déploiement), avec l'environnement virtuel activé, et non sur les autres nœuds : les certificats sont distribués par `deploy`. Prérequis : `kolla-genpwd` exécuté (étape 9.2) et `globals.yml` en place dans `/etc/kolla/`.
+
 ```bash
 # Certificats TLS pour tous les services OpenStack (CA privée de test)
 kolla-ansible certificates -i ~/multinode
 ```
 
-Les certificats générés sont stockés dans `/etc/kolla/certificates/` (la CA est dans `/etc/kolla/certificates/ca/root.crt`).
+Les certificats générés sont stockés dans `/etc/kolla/certificates/` (la CA est dans `/etc/kolla/certificates/ca/root.crt`). Vérifiez-les :
+
+```bash
+ls -l /etc/kolla/certificates/ /etc/kolla/certificates/ca/   # haproxy-internal.pem et ca/root.crt
+```
+
+Gardez une copie de `root.crt` et de `passwords.yml` **hors des nœuds** (jamais dans le dépôt GitHub) : `root.crt` doit être remis aux navigateurs et aux clients des tenants.
 
 > ℹ️ La VIP interne et externe étant la même adresse, seul le TLS « interne » est activé (`kolla_enable_tls_internal`) : c'est la seule configuration documentée pour une topologie à un seul réseau.
 
@@ -821,7 +871,7 @@ Si vous activez Octavia (phase 2), générez aussi ses certificats : `kolla-ansi
 
 ## Étape 11 — Déploiement d'OpenStack
 
-Le déploiement s'effectue en quatre commandes successives, toujours depuis `controller01` avec l'environnement virtuel activé.
+Le déploiement s'effectue en cinq commandes successives, toujours depuis `controller01` avec l'environnement virtuel activé.
 
 ```bash
 source ~/kolla-ansible/bin/activate
@@ -835,20 +885,21 @@ Prépare tous les nœuds (installation de Docker, configuration des répertoires
 kolla-ansible bootstrap-servers -i ~/multinode
 ```
 
+Contrôlez ensuite la version de Docker installée avec `docker --version` (Docker 29.8.2 observé sur Rocky Linux 10) : aucun pin de version n'est appliqué.
+
 <!-- ![Bootstrap des serveurs](Images/Pic-29.png) — capture à ajouter -->
 
-### 11.2 Anneaux Swift
+### 11.2 Pré-téléchargement des images
 
-Swift exige que les anneaux (rings) existent **avant** le déploiement. Docker vient d'être installé par l'étape précédente : générez les anneaux sur `controller01`.
+Chaque service OpenStack tourne dans un conteneur Docker : l'image doit être présente sur le nœud qui l'exécute. `pull` télécharge sur chaque nœud **uniquement les images des services de son rôle** (d'après l'inventaire) et signale les images introuvables **avant** le déploiement.
 
 ```bash
-~/Acceta-Kolla-Ansible-HA/Swift/build_swift_rings.sh
-ls -l /etc/kolla/config/swift   # object/account/container : .builder et .ring.gz
+df -h /var/lib/docker          # vérifier l'espace disque, surtout sur les contrôleurs
+kolla-ansible pull -i ~/multinode
 ```
 
-Le script crée 3 réplicas répartis sur les 3 disques de `storage01` (labels `d0`, `d1`, `d2`, étape 5.3). Il refuse d'écraser des anneaux existants (`FORCE=1` pour forcer).
-
-> ⚠️ Si l'image `swift-base` porte un autre nom dans votre version, le script l'indique : relevez-le avec `docker images | grep swift` puis relancez avec `KOLLA_SWIFT_BASE_IMAGE=<nom:étiquette>`.
+- Si un nœud est `unreachable` (code de sortie 4), vérifiez qu'il répond (`ping`, `ssh`) puis relancez : la commande est reprenable.
+- Si une image est introuvable (`manifest unknown`), voir [`Docs/Depannage.md`](Docs/Depannage.md).
 
 ### 11.3 Vérifications préalables
 
@@ -933,6 +984,13 @@ openstack service list
 openstack compute service list
 ```
 
+```bash
+# Vérifier Cinder : cinder-scheduler sur les contrôleurs, cinder-volume sur storage01, tous "up"
+openstack volume service list
+```
+
+> Si un `cinder-volume` apparaît en `down` sur un contrôleur, voir [`Docs/Depannage.md`](Docs/Depannage.md).
+
 ### 12.5 Accéder au tableau de bord Horizon
 
 Ouvrez un navigateur sur le FQDN de la VIP (entrée `/etc/hosts` de l'étape 9.4) :
@@ -975,7 +1033,7 @@ Une fois le cloud validé, créez un **projet** par tenant, un utilisateur avec 
 | [`globals.yml`](Config/globals.yml) | `/etc/kolla/globals.yml` | Configuration principale du déploiement |
 | [`multinode.hosts`](Config/multinode.hosts) | dépôt | Vos hôtes et rôles (sans les groupes dépendants de la version) |
 | `multinode` | `~/multinode` | Inventaire complet, généré par [`Scripts/build-inventory.sh`](Scripts/build-inventory.sh) |
-| [`build_swift_rings.sh`](Swift/build_swift_rings.sh) | `controller01` | Génère les anneaux Swift dans `/etc/kolla/config/swift/` |
+| [`build_swift_rings.sh`](Swift/build_swift_rings.sh) | — | Non utilisé : images Swift indisponibles en 2026.1 (voir [`Docs/Depannage.md`](Docs/Depannage.md)) |
 | `passwords.yml` | `/etc/kolla/passwords.yml` | Mots de passe des services (généré par `kolla-genpwd`) |
 | `admin-openrc.sh` | `/etc/kolla/admin-openrc.sh` | Variables d'environnement pour le client CLI |
 | `clouds.yaml` | `/etc/kolla/clouds.yaml` | Configuration SDK OpenStack |
@@ -991,3 +1049,4 @@ Une fois le cloud validé, créez un **projet** par tenant, un utilisateur avec 
 | [`Docs/Tenants.md`](Docs/Tenants.md) | Créer des projets, utilisateurs, quotas, réseaux, images et flavors pour vos tenants |
 | [`Docs/HA-Roadmap.md`](Docs/HA-Roadmap.md) | État réel de la HA, topologie cible, tests de panne, sauvegardes |
 | [`Docs/Corrections.md`](Docs/Corrections.md) | Corrections apportées à la configuration, avec leurs sources, et points restant à vérifier |
+| [`Docs/Depannage.md`](Docs/Depannage.md) | Erreurs rencontrées pendant le déploiement et solutions |
