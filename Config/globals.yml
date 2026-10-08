@@ -28,8 +28,10 @@ openstack_release: "2026.1"
 network_address_family: "ipv4"
 kolla_container_engine: docker
 
-# Docker (Rocky Linux) — version figée en 28.x
-docker_yum_package_pin: "3:28.*"
+# Docker : aucun pin de version. Le pin "docker_yum_package_pin: 3:28.*" d'une
+# version précédente n'a eu aucun effet (Docker 29.8.2 a été installé par
+# bootstrap-servers sur Rocky Linux 10). Cette version a passé
+# bootstrap-servers et pull ; elle n'est pas encore validée par un deploy.
 
 # Registre d'images : NE PAS surcharger docker_registry / docker_namespace.
 # Les valeurs par défaut de la release pointent vers quay.io/openstack.kolla.
@@ -122,16 +124,21 @@ enable_cinder_backend_lvm: "yes"
 # Ne pas définir cinder_enabled_backends : Kolla le calcule à partir des
 # options enable_cinder_backend_*.
 
-# Sauvegarde des volumes vers Swift (nécessite enable_swift ci-dessous)
-enable_cinder_backup: "yes"
-cinder_backup_driver: "swift"
+# Sauvegarde des volumes : DÉSACTIVÉE pour le moment. Elle utilisait Swift
+# comme destination, or Swift est désactivé (voir plus bas). Pour la remettre,
+# choisir un autre backend (NFS, Ceph, S3) et définir cinder_backup_driver.
+enable_cinder_backup: "no"
+# cinder_backup_driver: "nfs"
 
 # ++++++++++++++++++++++
 # Stockage objet (Swift)
 # ++++++++++++++++++++++
-# Les anneaux (rings) doivent exister AVANT "kolla-ansible deploy" :
-# voir Swift/build_swift_rings.sh et l'étape 11.2 du README.
-enable_swift: "yes"
+# DÉSACTIVÉ : les images conteneur Swift ne sont pas publiées sur quay.io pour
+# la série 2026.1 (seule l'étiquette 2024.2-rocky-9 existe pour
+# swift-proxy-server), alors que les images nova-api et keystone existent bien
+# en 2026.1-rocky-10. Avec enable_swift: "yes", le déploiement chercherait des
+# images introuvables. Voir Docs/Depannage.md.
+enable_swift: "no"
 
 # ++++++++++++++++++++++++++++++
 # Gestion des secrets (Barbican)

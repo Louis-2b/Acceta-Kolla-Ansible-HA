@@ -1,19 +1,26 @@
 #!/usr/bin/env bash
 # Construit les anneaux (rings) Swift : object, account, container.
 #
+# ATTENTION — NON UTILISÉ avec la série 2026.1 : les images conteneur Swift ne
+# sont pas publiées sur quay.io pour cette série (seule l'étiquette
+# 2024.2-rocky-9 existe pour swift-proxy-server), donc Swift est désactivé
+# (enable_swift: "no" dans Config/globals.yml). Ce script est conservé pour
+# une série où ces images existent : il n'a plus d'image par défaut, il faut
+# fournir KOLLA_SWIFT_BASE_IMAGE explicitement. Voir Docs/Depannage.md.
+#
 # À exécuter sur controller01 (nœud de déploiement), APRÈS
 # "kolla-ansible bootstrap-servers" (Docker doit être installé) et AVANT
 # "kolla-ansible deploy". Les fichiers sont écrits dans /etc/kolla/config/swift.
 #
-# Variables optionnelles :
+# Variables :
+#   KOLLA_SWIFT_BASE_IMAGE  OBLIGATOIRE. Image complète contenant
+#                    swift-ring-builder, au format <registre>/<nom>:<étiquette>.
+#                    Vérifiez qu'elle existe (docker pull) avant de lancer.
 #   STORAGE_NODES    IP des nœuds de stockage, séparées par des espaces
-#                    (défaut : 172.20.10.8 = storage01)
+#                    (défaut : 172.20.10.10 = storage01)
 #   DISKS            nombre de disques Swift par nœud : d0..d(N-1) (défaut : 3)
 #   REPLICAS         nombre de réplicas (défaut : 3)
 #   PART_POWER       puissance de partition (défaut : 10)
-#   OPENSTACK_RELEASE  série Kolla (défaut : 2026.1)
-#   KOLLA_SWIFT_BASE_IMAGE  image complète à utiliser. Défaut :
-#                    quay.io/openstack.kolla/swift-base:<release>-rocky-10
 #   RING_DIR         dossier des anneaux (défaut : /etc/kolla/config/swift)
 #   FORCE=1          autorise l'écrasement d'anneaux existants (DESTRUCTIF)
 #
@@ -21,14 +28,21 @@
 # du même nœud : acceptable en lab, aucune protection contre la perte du nœud.
 set -euo pipefail
 
-STORAGE_NODES="${STORAGE_NODES:-172.20.10.8}"
+STORAGE_NODES="${STORAGE_NODES:-172.20.10.10}"
 DISKS="${DISKS:-3}"
 REPLICAS="${REPLICAS:-3}"
 PART_POWER="${PART_POWER:-10}"
-OPENSTACK_RELEASE="${OPENSTACK_RELEASE:-2026.1}"
-KOLLA_SWIFT_BASE_IMAGE="${KOLLA_SWIFT_BASE_IMAGE:-quay.io/openstack.kolla/swift-base:${OPENSTACK_RELEASE}-rocky-10}"
+KOLLA_SWIFT_BASE_IMAGE="${KOLLA_SWIFT_BASE_IMAGE:-}"
 RING_DIR="${RING_DIR:-/etc/kolla/config/swift}"
 MIN_PART_HOURS=1
+
+if [[ -z "$KOLLA_SWIFT_BASE_IMAGE" ]]; then
+  echo "ERREUR : KOLLA_SWIFT_BASE_IMAGE n'est pas défini." >&2
+  echo "         Avec Kolla-Ansible 2026.1, les images Swift ne sont pas publiées" >&2
+  echo "         sur quay.io : Swift est désactivé (voir Docs/Depannage.md)." >&2
+  echo "         Si vous disposez d'une image valide : KOLLA_SWIFT_BASE_IMAGE=<registre/nom:étiquette> $0" >&2
+  exit 1
+fi
 
 if ! command -v docker >/dev/null 2>&1; then
   echo "ERREUR : docker introuvable. Lancez d'abord : kolla-ansible bootstrap-servers -i ~/multinode" >&2
