@@ -909,7 +909,7 @@ Valide la configuration avant le déploiement (interfaces, ressources, connectiv
 kolla-ansible prechecks -i ~/multinode --use-test-images
 ```
 
-> ℹ️ `--use-test-images` est obligatoire tant que les images viennent de `quay.io/openstack.kolla`, que le projet Kolla publie « pour les tests ». En production, construisez vos images et utilisez un registre privé (voir [`Docs/HA-Roadmap.md`](Docs/HA-Roadmap.md)). Autres blocages rencontrés au précheck : [`Docs/Depannage.md`](Docs/Depannage.md#précheck--erreurs-rencontrées).
+> ℹ️ `--use-test-images` est obligatoire tant que les images viennent de `quay.io/openstack.kolla`, que le projet Kolla publie « pour les tests ». En production, construisez vos images et utilisez un registre privé (voir [`Docs/Production.md`](Docs/Production.md)). Autres blocages rencontrés au précheck : [`Docs/Depannage.md`](Docs/Depannage.md#précheck--erreurs-rencontrées).
 
 <!-- ![Vérifications préalables](Images/Pic-30.png) — capture à ajouter -->
 
@@ -1052,5 +1052,6 @@ Une fois le cloud validé, créez un **projet** par tenant, un utilisateur avec 
 |----------|---------|
 | [`Docs/Tenants.md`](Docs/Tenants.md) | Créer des projets, utilisateurs, quotas, réseaux, images et flavors pour vos tenants |
 | [`Docs/HA-Roadmap.md`](Docs/HA-Roadmap.md) | État réel de la HA, topologie cible, tests de panne, sauvegardes |
+| [`Docs/Production.md`](Docs/Production.md) | Liste complète pour passer en production (décisions, matériel, réseau, Ceph, sécurité, sauvegardes, tests, exploitation) |
 | [`Docs/Corrections.md`](Docs/Corrections.md) | Corrections apportées à la configuration, avec leurs sources, et points restant à vérifier |
 | [`Docs/Depannage.md`](Docs/Depannage.md) | Erreurs rencontrées pendant le déploiement et solutions |
