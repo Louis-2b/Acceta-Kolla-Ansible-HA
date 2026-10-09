@@ -856,12 +856,12 @@ kolla-ansible certificates -i ~/multinode
 Les certificats générés sont stockés dans `/etc/kolla/certificates/` (la CA est dans `/etc/kolla/certificates/ca/root.crt`). Vérifiez-les :
 
 ```bash
-ls -l /etc/kolla/certificates/ /etc/kolla/certificates/ca/   # haproxy-internal.pem et ca/root.crt
+ls -l /etc/kolla/certificates/ /etc/kolla/certificates/ca/   # haproxy.pem, haproxy-internal.pem et ca/root.crt
 ```
 
 Gardez une copie de `root.crt` et de `passwords.yml` **hors des nœuds** (jamais dans le dépôt GitHub) : `root.crt` doit être remis aux navigateurs et aux clients des tenants.
 
-> ℹ️ La VIP interne et externe étant la même adresse, seul le TLS « interne » est activé (`kolla_enable_tls_internal`) : c'est la seule configuration documentée pour une topologie à un seul réseau.
+> ℹ️ La VIP interne et externe étant la même adresse, le précheck exige que le TLS soit activé **sur les deux réseaux** (`kolla_enable_tls_internal` et `kolla_enable_tls_external` à `"yes"`). Avec un seul des deux, `prechecks` échoue. Si vous modifiez ces variables après avoir généré les certificats, relancez `kolla-ansible certificates` : `haproxy.pem` (externe) et `haproxy-internal.pem` doivent exister.
 
 > ⚠️ La CA générée est une CA de test, suffisante pour un lab. Avant d'ouvrir le cloud à d'autres personnes, remplacez-la par une CA interne ou des certificats gérés à l'extérieur (`kolla_externally_managed_cert`).
 
@@ -906,8 +906,10 @@ kolla-ansible pull -i ~/multinode
 Valide la configuration avant le déploiement (interfaces, ressources, connectivité) :
 
 ```bash
-kolla-ansible prechecks -i ~/multinode
+kolla-ansible prechecks -i ~/multinode --use-test-images
 ```
+
+> ℹ️ `--use-test-images` est obligatoire tant que les images viennent de `quay.io/openstack.kolla`, que le projet Kolla publie « pour les tests ». En production, construisez vos images et utilisez un registre privé (voir [`Docs/HA-Roadmap.md`](Docs/HA-Roadmap.md)). Autres blocages rencontrés au précheck : [`Docs/Depannage.md`](Docs/Depannage.md#précheck--erreurs-rencontrées).
 
 <!-- ![Vérifications préalables](Images/Pic-30.png) — capture à ajouter -->
 
@@ -918,8 +920,10 @@ kolla-ansible prechecks -i ~/multinode
 Lance le déploiement complet de l'infrastructure OpenStack :
 
 ```bash
-kolla-ansible deploy -i ~/multinode
+kolla-ansible deploy -i ~/multinode --use-test-images
 ```
+
+Lancez-le dans `tmux` pour qu'une coupure SSH ne l'interrompe pas. Il est reprenable : relancé après un échec, il reprend où il s'est arrêté. Si l'option est refusée par cette commande, retirez-la (`kolla-ansible deploy --help`).
 
 <!-- ![Déploiement OpenStack](Images/Pic-31.png) — capture à ajouter -->
 

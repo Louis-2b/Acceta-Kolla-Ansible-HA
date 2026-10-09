@@ -42,8 +42,9 @@ Avec Ceph, on peut supprimer le NFS de Glance, le LVM de Cinder et le backend `f
 3. **Second nœud réseau** : ajoutez `network02` dans [`Config/multinode.hosts`](../Config/multinode.hosts), régénérez l'inventaire, puis activez `enable_neutron_agent_ha: "yes"` dans `globals.yml`.
 4. **Second nœud de calcul** (`compute02`).
 5. **Ceph externe**, puis bascule de Glance, Cinder et Nova dessus (`glance_backend_ceph`, etc.).
-6. **Décider ML2/OVS ou OVN avant d'avoir des données de tenants** : OVN (`neutron_plugin_agent: "ovn"`) évite les agents L3/DHCP centralisés, mais migrer de l'un à l'autre sur un cloud en production est un chantier à part.
-7. **Phase 2** : Octavia (image amphora, réseau de gestion), puis télémétrie (avec backend Gnocchi partagé).
+6. **Images de production** : les images de `quay.io/openstack.kolla` sont publiées « pour les tests » (d'où `--use-test-images`). Pour la production, construire ses images avec `kolla-build`, les stocker dans un registre privé et renseigner `docker_registry` / `docker_namespace` dans `globals.yml`. Flux non testé sur ce projet : à documenter et à valider à ce moment-là.
+7. **Décider ML2/OVS ou OVN avant d'avoir des données de tenants** : OVN (`neutron_plugin_agent: "ovn"`) évite les agents L3/DHCP centralisés, mais migrer de l'un à l'autre sur un cloud en production est un chantier à part.
+8. **Phase 2** : Octavia (image amphora, réseau de gestion), puis télémétrie (avec backend Gnocchi partagé).
 
 ## 4. Tests de panne (à faire avant d'accueillir des tenants)
 
