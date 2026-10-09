@@ -2,7 +2,7 @@
 
 Problèmes rencontrés pendant le déploiement de ce lab (Kolla-Ansible 2026.1, Rocky Linux 10.2) et solutions. Les sorties citées viennent du lab réel du 08/10/2026.
 
-Sommaire : [dnf](#dnf--nothing-provides-openssl-libs) · [Images introuvables](#image-introuvable--manifest-unknown) · [pull unreachable](#kolla-ansible-pull--unreachable) · [Avertissement inventaire](#avertissement--invalid-characters-were-found-in-group-names) · [NFS](#montage-nfs-glance) · [SELinux](#selinux) · [Docker](#version-de-docker) · [Cinder](#cinder--groupes-et-contrôle) · [RAM](#ram-insuffisante)
+Sommaire : [dnf](#dnf--nothing-provides-openssl-libs) · [Images introuvables](#image-introuvable--manifest-unknown) · [pull unreachable](#kolla-ansible-pull--unreachable) · [Avertissement inventaire](#avertissement--invalid-characters-were-found-in-group-names) · [NFS](#montage-nfs-glance) · [SELinux](#selinux) · [Docker](#version-de-docker) · [Cinder](#cinder--groupes-et-contrôle) · [RAM](#ram-insuffisante) · [Précheck](#précheck--erreurs-rencontrées)
 
 ---
 
@@ -164,6 +164,8 @@ source /etc/kolla/admin-openrc.sh
 openstack volume service list
 ```
 
+**Précheck « Multiple cinder-volume instances detected but cinder_cluster_name is not set ».** Le groupe `cinder-volume-multiple` regroupe `cinder` (contrôleurs) et `storage` (`storage01`) : 4 hôtes, d'où l'erreur. N'ajoutez pas `cinder_cluster_name` : un cluster Cinder suppose un stockage partagé, pas un LVM local. Solution retenue : `cinder_cluster_skip_precheck: true` dans `globals.yml` (à retirer avec Ceph). Si, après `deploy`, un `cinder-volume` d'un contrôleur est sans backend ou `down`, l'inventaire sera à ajuster.
+
 Attendu : `cinder-scheduler` sur les contrôleurs et un `cinder-volume` sur `storage01`, tous `up`. Si un `cinder-volume` est `down` sur un contrôleur, il n'a pas de volume group (`cinder-volumes` n'existe que sur `storage01`) : ouvrez un ticket avec la sortie de `docker logs cinder_volume` sur ce contrôleur avant de modifier l'inventaire.
 
 ---
@@ -177,3 +179,17 @@ Attendu : `cinder-scheduler` sur les contrôleurs et un `cinder-volume` sur `sto
 **Solution.** Éteindre les VMs et augmenter la RAM dans VMware avant `deploy`. Ordres de grandeur pour un lab (estimation, à adapter à la RAM du PC hôte) : contrôleurs 8–12 Go, `compute01` 6–8 Go, `network01` et `storage01` 3–4 Go. Pour alléger les contrôleurs, désactivez au besoin Magnum, Designate, Barbican, Grafana et Prometheus dans `globals.yml`.
 
 Après redémarrage : `ssh kolla@<nœud> "free -h"`.
+
+**Avec 32 Go sur le PC hôte** (estimation de lab, à ajuster) : contrôleurs 5–6 Go, `compute01` 4 Go, `network01` 3 Go, `storage01` 2,5 Go (≈ 25,5 Go au total), en mettant `enable_prometheus`, `enable_grafana`, `enable_barbican`, `enable_magnum` et `enable_designate` à `"no"`. Ajouter 2 Go de swap par VM évite qu'un pic tue un conteneur. Dans VMware : « Fit all virtual machine memory into reserved host RAM ». Activer la virtualisation imbriquée sur `compute01`, sinon `nova_compute_virt_type: "qemu"` (très lent).
+
+---
+
+## Précheck : erreurs rencontrées
+
+Sorties du lab du 09/10/2026, dans l'ordre où elles sont apparues. `prechecks` est passé sur les 7 hôtes (`failed=0`) après les trois corrections.
+
+| Message | Cause | Solution |
+|---------|-------|----------|
+| `kolla_external_vip_address and kolla_internal_vip_address must not be the same when only one network has TLS enabled` | VIP unique avec TLS sur un seul réseau | `kolla_enable_tls_external: "yes"` en plus de l'interne, puis `kolla-ansible certificates -i ~/multinode` ; contrôle : `haproxy.pem` et `haproxy-internal.pem` dans `/etc/kolla/certificates/` |
+| `Kolla images from quay.io/openstack.kolla namespace are meant only for testing purposes ... --use-test-images` | Les images de quay.io sont publiées pour les tests | `kolla-ansible prechecks -i ~/multinode --use-test-images` (idem pour `deploy` si demandé). En production : images construites et registre privé |
+| `Multiple cinder-volume instances detected but cinder_cluster_name is not set` | Voir [Cinder](#cinder--groupes-et-contrôle) | `cinder_cluster_skip_precheck: true` |

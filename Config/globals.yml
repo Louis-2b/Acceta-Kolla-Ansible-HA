@@ -67,11 +67,13 @@ enable_keepalived: "{{ enable_haproxy | bool }}"
 # ++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 # TLS
 # ++++++++++++++++++++++++++++++++++++++++++++++++++++++++
-# VIP interne et externe identiques (une seule adresse) : la documentation
-# indique que, dans une topologie à un seul réseau, le TLS ne s'active que
-# via les variables "internal". Ne pas activer kolla_enable_tls_external.
+# VIP interne et externe identiques (une seule adresse) : le précheck de
+# Kolla-Ansible 2026.1 refuse d'activer le TLS sur un seul des deux réseaux
+# ("must not be the same when only one network has TLS enabled"). Les deux
+# doivent donc être activés. Après modification, relancer
+# "kolla-ansible certificates" pour générer haproxy.pem ET haproxy-internal.pem.
 kolla_enable_tls_internal: "yes"
-kolla_enable_tls_external: "no"
+kolla_enable_tls_external: "yes"
 
 # CA privée générée par "kolla-ansible certificates" : les conteneurs et
 # le client en ligne de commande doivent lui faire confiance.
@@ -101,6 +103,8 @@ enable_valkey: "yes"
 # ++++++++++++++++++++++++
 # Supervision
 # ++++++++++++++++++++++++
+# Gourmands en RAM : pour un lab à moins de ~8 Go par contrôleur, mettre
+# "no" ici et sur Barbican, Magnum et Designate plus bas (voir Docs/Depannage.md).
 enable_prometheus: "yes"
 enable_grafana: "yes"
 
@@ -123,6 +127,12 @@ enable_cinder_backend_lvm: "yes"
 # Le volume group doit s'appeler "cinder-volumes" (créé à l'étape 5.2 du README).
 # Ne pas définir cinder_enabled_backends : Kolla le calcule à partir des
 # options enable_cinder_backend_*.
+
+# Le groupe générique cinder-volume est sur les contrôleurs et cinder-volume-lvm
+# sur storage01 : le précheck y voit "plusieurs instances" et exige un
+# cinder_cluster_name. Un cluster suppose un stockage partagé (Ceph), pas le
+# LVM local de storage01 : on saute donc ce contrôle. À retirer avec Ceph.
+cinder_cluster_skip_precheck: true
 
 # Sauvegarde des volumes : DÉSACTIVÉE pour le moment. Elle utilisait Swift
 # comme destination, or Swift est désactivé (voir plus bas). Pour la remettre,
